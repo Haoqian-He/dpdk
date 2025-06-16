@@ -99,6 +99,7 @@ VHOST_MESSAGE_HANDLER(VHOST_USER_POSTCOPY_LISTEN, vhost_user_set_postcopy_listen
 VHOST_MESSAGE_HANDLER(VHOST_USER_POSTCOPY_END, vhost_user_postcopy_end, false, false) \
 VHOST_MESSAGE_HANDLER(VHOST_USER_GET_INFLIGHT_FD, vhost_user_get_inflight_fd, false, false) \
 VHOST_MESSAGE_HANDLER(VHOST_USER_SET_INFLIGHT_FD, vhost_user_set_inflight_fd, true, false) \
+VHOST_MESSAGE_HANDLER(VHOST_USER_GET_MAX_MEM_SLOTS, vhost_user_get_max_mem_slots, false, false) \
 VHOST_MESSAGE_HANDLER(VHOST_USER_SET_STATUS, vhost_user_set_status, false, false) \
 VHOST_MESSAGE_HANDLER(VHOST_USER_GET_STATUS, vhost_user_get_status, false, false)
 
@@ -2828,6 +2829,25 @@ vhost_user_postcopy_end(struct virtio_net **pdev,
 	}
 
 	ctx->msg.payload.u64 = 0;
+	ctx->msg.size = sizeof(ctx->msg.payload.u64);
+	ctx->fd_num = 0;
+
+	return RTE_VHOST_MSG_RESULT_REPLY;
+}
+
+/*
+ * This should be no less than VHOST_USER_MEM_REGIONS_MAX, to accept any
+ * allowed VHOST_USER_SET_MEM_TABLE message.  The master may use more via
+ * VHOST_USER_ADD_MEM_REG message if VHOST_USER_PROTOCOL_F_CONFIGURE_MEM_SLOTS
+ * is negotiated.
+ */
+#define VHOST_USER_RAM_SLOTS_MAX 32
+
+static int
+vhost_user_get_max_mem_slots(struct virtio_net **pdev __rte_unused,
+			     struct vhu_msg_context *ctx,
+			     int main_fd __rte_unused) {
+	ctx->msg.payload.u64 = VHOST_USER_RAM_SLOTS_MAX;
 	ctx->msg.size = sizeof(ctx->msg.payload.u64);
 	ctx->fd_num = 0;
 
