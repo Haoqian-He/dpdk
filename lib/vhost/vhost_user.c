@@ -101,7 +101,8 @@ VHOST_MESSAGE_HANDLER(VHOST_USER_GET_INFLIGHT_FD, vhost_user_get_inflight_fd, fa
 VHOST_MESSAGE_HANDLER(VHOST_USER_SET_INFLIGHT_FD, vhost_user_set_inflight_fd, true, false) \
 VHOST_MESSAGE_HANDLER(VHOST_USER_GET_MAX_MEM_SLOTS, vhost_user_get_max_mem_slots, false, false) \
 VHOST_MESSAGE_HANDLER(VHOST_USER_SET_STATUS, vhost_user_set_status, false, false) \
-VHOST_MESSAGE_HANDLER(VHOST_USER_GET_STATUS, vhost_user_get_status, false, false)
+VHOST_MESSAGE_HANDLER(VHOST_USER_GET_STATUS, vhost_user_get_status, false, false) \
+VHOST_MESSAGE_HANDLER(VHOST_USER_ADD_MEM_REG, vhost_user_add_mem_reg, true, true)
 
 #define VHOST_MESSAGE_HANDLER(id, handler, accepts_fd, lock_all_qps) \
 	id ## _LOCK_ALL_QPS = lock_all_qps,
@@ -1380,6 +1381,97 @@ vhost_user_mmap_region(struct virtio_net *dev,
 		mmap_offset);
 
 	return 0;
+}
+
+static int
+vhost_user_memmap_add_slot(struct rte_vhost_memory_array *mems, uint64_t gpa, uint64_t uva,
+	size_t size, int fd, uint64_t offset)
+{
+	struct rte_vhost_mem_region *region;
+	int numa_node = SOCKET_ID_ANY;
+	uint32_t i;
+	
+	/* check for overflow */
+	if (gpa + size < gpa || uva + size < uva) {
+	    return -EINVAL;
+	}
+
+	if (mems->num > RTE_VHOST_RAM_SLOTS_MAX) {
+		return -ENOBUFS;
+	}
+
+	/* check for intersection with existing slots */
+	for (i = 0; i < mems->num; i++) {
+	    struct rte_vhost_mem_region *reg = mems->regions[i];
+	    if (reg->guest_phys_addr + reg->size <= gpa ||
+			gpa + size <= reg->guest_phys_addr ||
+			reg->host_user_addr + reg->size <= uva ||
+			uva + size <= reg->host_user_addr) {
+	        continue;
+	    }
+	    return -EINVAL;
+	}
+	
+	/* find appropriate position to keep ascending order in gpa */
+	for (i = mems->num; i > 0; i--) {
+	    struct rte_vhost_mem_region *reg = mems->regions[i - 1];
+	    if (reg->guest_phys_addr < gpa) {
+	        break;
+	    }
+	}
+
+	region = rte_zmalloc_socket("vhost-mem-table",
+			     sizeof(struct rte_vhost_mem_region)
+			     , 0, numa_node);
+	if (region == NULL) {
+		return ENOMEM;
+	}
+	region->guest_phys_addr = gpa;
+	region->guest_user_addr = uva;
+	region->size = size;
+	region->fd = fd;
+	if (i < mems->num) {
+	    memmove(&mems->regions[i + 1], &mems->regions[i],
+	            sizeof(mems->regions[0]) * (mems->num - i));
+	}
+	mems->num++;
+	mems->regions[i] = region;
+	return 0;
+}
+
+static int
+vhost_user_add_mem_reg(struct virtio_net **pdev,
+			struct vhu_msg_context *ctx,
+			int main_fd)
+{
+	struct virtio_net *dev = *pdev;
+	struct VhostUserMemSingleDesc *memory = &ctx->msg.payload.single_memory;
+	struct VhostUserMemoryRegion *reg = &memory->region;
+	struct rte_vhost_memory_array *mems = dev->mems;
+	int ret;
+
+	if (dev->mem != NULL) {
+		VHOST_CONFIG_LOG(dev->ifname, ERR,
+			"memory table not set, cannot add memory region");
+		return RTE_VHOST_MSG_RESULT_ERR;
+	}
+
+	if (mems == NULL) {
+		/* Allocate memory table */
+		dev->mems = rte_zmalloc_socket("vhost-mem-table",
+			sizeof(struct rte_vhost_memory_array ), 0,
+			rte_socket_id());
+	}
+
+	if (mems->num > VHOST_MEMORY_MAX_NREGIONS) {
+		VHOST_CONFIG_LOG(dev->ifname, ERR,
+			"too many memory regions (%u)",
+			mems->num);
+		return RTE_VHOST_MSG_RESULT_ERR;
+	}
+	ret = vhost_user_memmap_add_slot(mems, reg->guest_phys_addr, reg->userspace_addr,
+				  reg->memory_size, ctx->fds[0], reg->mmap_offset);
+
 }
 
 static int

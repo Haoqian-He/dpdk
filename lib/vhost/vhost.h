@@ -481,7 +481,10 @@ struct inflight_mem_info {
  */
 struct __rte_cache_aligned virtio_net {
 	/* Frontend (QEMU) memory and memory region information */
-	struct rte_vhost_memory	*mem;
+	union {
+		struct rte_vhost_memory_array *mems;
+		struct rte_vhost_memory *mem;
+	};
 	uint64_t		features;
 	uint64_t		protocol_features;
 	int			vid;

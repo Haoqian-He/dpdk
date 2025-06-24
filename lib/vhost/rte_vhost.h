@@ -150,6 +150,17 @@ struct rte_vhost_memory {
 	struct rte_vhost_mem_region regions[];
 };
 
+#define RTE_VHOST_RAM_SLOTS_MAX 32
+
+/**
+ * Define a non-flexible array version of rte_vhost_mem_region
+ * with variable length.
+ */
+struct rte_vhost_memory_array {
+	uint32_t num; /* number of regions */
+	struct rte_vhost_mem_region *regions[RTE_VHOST_RAM_SLOTS_MAX]; /* pointer to array of regions */
+};
+
 struct rte_vhost_inflight_desc_split {
 	uint8_t inflight;
 	uint8_t padding[5];
